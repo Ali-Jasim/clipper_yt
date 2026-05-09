@@ -46,6 +46,7 @@ DEFAULT_END_TIME = ""
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "youtube_clips"))
 DEFAULT_COOKIES_FILE = "/etc/secrets/youtube_cookies.txt"
 YTDLP_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", DEFAULT_COOKIES_FILE)
+SESSION_COOKIES_FILE = OUTPUT_DIR / "_session_cookies.txt"
 
 # Render requires web services to bind to 0.0.0.0 and the PORT environment
 # variable. Locally, no PORT is usually set, so the app picks a free port and
@@ -93,43 +94,64 @@ APP_HTML = r"""<!doctype html>
   <title>YouTube Clipper</title>
   <style>
     :root {
-      color-scheme: light;
-      font-family: Arial, Helvetica, sans-serif;
-      background: #f5f7f8;
-      color: #172126;
+      --bg:              #0d0f17;
+      --surface:         #161923;
+      --surface2:        #1c2030;
+      --border:          #272c3d;
+      --accent:          #22d3ee;
+      --accent-dark:     #06b6d4;
+      --accent-light:    #164e63;
+      --text:            #e2e8f0;
+      --text-muted:      #8892a4;
+      --success:         #4ade80;
+      --success-bg:      #052e16;
+      --success-border:  #166534;
+      --error:           #f87171;
+      --error-bg:        #3b0a0a;
+      --error-border:    #7f1d1d;
+      --loading:         #93c5fd;
+      --loading-bg:      #0f1e3d;
+      --loading-border:  #1e3a5f;
+      --radius:          10px;
+      --radius-sm:       6px;
+      --shadow:          0 1px 4px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      color-scheme: dark;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      margin: 0;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
+      padding: 24px 16px 48px;
     }
 
     main {
-      width: min(1080px, calc(100vw - 32px));
+      width: min(1080px, 100%);
       margin: 0 auto;
-      padding: 24px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
     h1 {
-      margin: 0 0 18px;
-      font-size: 28px;
+      font-size: 22px;
       font-weight: 700;
-      letter-spacing: 0;
+      letter-spacing: -.5px;
+      margin-bottom: 4px;
     }
 
-    .toolbar,
-    .clip-controls,
-    .status {
-      background: #ffffff;
-      border: 1px solid #d9e0e3;
-      border-radius: 8px;
-      padding: 14px;
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
     }
 
+    /* ── Toolbar ── */
     .toolbar {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -137,530 +159,786 @@ APP_HTML = r"""<!doctype html>
       align-items: center;
     }
 
-    input {
+    /* ── Inputs ── */
+    input[type="text"] {
       width: 100%;
-      min-height: 40px;
-      border: 1px solid #b8c4ca;
-      border-radius: 6px;
-      padding: 8px 10px;
+      height: 38px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
       font: inherit;
-      background: #ffffff;
-      color: #172126;
+      font-size: 14px;
+      background: var(--surface2);
+      color: var(--text);
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input[type="text"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(34,211,238,.15);
     }
 
-    .time-input {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
-      gap: 6px;
-      align-items: center;
-    }
-
-    .time-input input {
-      text-align: center;
-    }
-
-    .time-separator {
-      color: #60727a;
-      font-weight: 700;
-    }
-
+    /* ── Buttons ── */
     button {
-      min-height: 40px;
-      border: 0;
-      border-radius: 6px;
-      padding: 8px 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 38px;
+      padding: 0 16px;
+      border: none;
+      border-radius: var(--radius-sm);
       font: inherit;
-      font-weight: 700;
-      background: #116a7b;
-      color: #ffffff;
+      font-size: 14px;
+      font-weight: 600;
       cursor: pointer;
       white-space: nowrap;
+      background: var(--accent);
+      color: #fff;
+      transition: background .15s, opacity .15s;
     }
+    button:hover:not(:disabled) { background: var(--accent-dark); }
+    button:disabled { opacity: .55; cursor: wait; }
 
     button.secondary {
-      background: #41545d;
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      font-weight: 500;
     }
+    button.secondary:hover:not(:disabled) { background: var(--accent-light); }
 
-    button:disabled {
-      cursor: wait;
-      opacity: 0.65;
-    }
-
+    /* ── Video preview ── */
     .preview {
-      margin: 16px 0;
-      background: #101820;
-      border-radius: 8px;
+      background: #080b10;
+      border-radius: var(--radius);
       overflow: hidden;
-      aspect-ratio: 16 / 9;
-      border: 1px solid #18242c;
+      aspect-ratio: 16/9;
+      border: 1px solid var(--border);
     }
-
-    video {
+    video, #youtubePlayer {
       width: 100%;
       height: 100%;
       display: block;
-      background: #101820;
+      border: none;
+      background: #080b10;
     }
-
-    iframe,
-    #youtubePlayer {
-      width: 100%;
-      height: 100%;
-      border: 0;
-      display: block;
-    }
-
     .empty-preview {
       height: 100%;
       display: grid;
       place-items: center;
-      color: #d5dde1;
-      padding: 24px;
+      color: var(--text-muted);
       text-align: center;
+      padding: 32px;
+      font-size: 15px;
+      line-height: 1.6;
     }
 
-    .clip-controls {
+    /* ── Clip range bar ── */
+    .clip-bar-wrapper {
       display: none;
-      grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
-      gap: 10px;
+      flex-direction: column;
+      gap: 5px;
+      padding: 0 2px;
+    }
+    .clip-bar-wrapper.visible { display: flex; }
+
+    .clip-bar {
+      position: relative;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      cursor: default;
+    }
+    .clip-bar-fill {
+      position: absolute;
+      top: 0; bottom: 0;
+      background: var(--accent);
+      opacity: .75;
+      border-radius: 3px;
+      transition: left .18s, width .18s;
+    }
+    .clip-bar-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Clip controls ── */
+    .clip-controls { display: none; }
+    .clip-controls.visible {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-areas:
+        "start   end"
+        "meta    meta"
+        "file    chop";
+      gap: 14px 20px;
       align-items: end;
     }
 
-    .clip-controls.visible {
-      display: grid;
-    }
-
-    label {
-      display: grid;
+    .time-group {
+      display: flex;
+      flex-direction: column;
       gap: 5px;
+    }
+    .time-group label,
+    .file-group label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .time-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+    }
+
+    .clip-meta {
+      grid-area: meta;
+      display: flex;
+      align-items: center;
+      gap: 6px;
       font-size: 13px;
+      color: var(--text-muted);
+    }
+    .clip-meta .duration-value {
       font-weight: 700;
-      color: #314148;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
     }
-
-    .status {
-      margin-top: 16px;
-      min-height: 52px;
-      white-space: pre-wrap;
-      line-height: 1.45;
-      color: #263940;
+    .clip-meta .hint {
+      margin-left: auto;
+      font-size: 11px;
     }
-
-    .download-area {
-      margin-top: 10px;
-    }
-
-    .download-area a {
+    kbd {
       display: inline-block;
-      border-radius: 6px;
-      padding: 10px 14px;
-      background: #116a7b;
-      color: #ffffff;
-      font-weight: 700;
-      text-decoration: none;
+      padding: 1px 5px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
     }
 
-    @media (max-width: 760px) {
-      .toolbar,
-      .clip-controls {
-        grid-template-columns: 1fr;
-      }
+    .file-group {
+      grid-area: file;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    #chop { grid-area: chop; }
 
-      button {
-        width: 100%;
+    /* ── Progress bar ── */
+    .progress-track {
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    .progress-track.active { opacity: 1; }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 40%;
+      border-radius: 2px;
+      transform: translateX(-150%);
+    }
+    .progress-fill.running {
+      animation: sweep 1.4s ease-in-out infinite;
+    }
+    @keyframes sweep {
+      0%   { transform: translateX(-150%); }
+      100% { transform: translateX(350%); }
+    }
+
+    /* ── Status ── */
+    .status {
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      color: var(--text-muted);
+      background: var(--surface2);
+      transition: background .2s, border-color .2s, color .2s;
+    }
+    .status[data-type="success"] {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+      color: var(--success);
+    }
+    .status[data-type="error"] {
+      background: var(--error-bg);
+      border-color: var(--error-border);
+      color: var(--error);
+    }
+    .status[data-type="loading"] {
+      background: var(--loading-bg);
+      border-color: var(--loading-border);
+      color: var(--loading);
+    }
+
+    /* ── Download ── */
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: var(--radius-sm);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+      transition: background .15s;
+    }
+    .download-btn:hover { background: var(--accent-dark); }
+
+    /* ── Cookie bar ── */
+    .cookie-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      padding: 2px 2px;
+    }
+    .cookie-status {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--text-muted);
+    }
+    .cookie-status.loaded  { color: var(--success); }
+    .cookie-status.missing { color: #fb923c; }
+    .cookie-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+    }
+    .cookie-upload-label {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+      white-space: nowrap;
+    }
+    .cookie-upload-label:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 620px) {
+      .toolbar { grid-template-columns: 1fr; }
+      .clip-controls.visible {
+        grid-template-columns: 1fr;
+        grid-template-areas: "start" "end" "meta" "file" "chop";
       }
+      button { width: 100%; }
+      .time-row button { width: auto; }
     }
   </style>
 </head>
 <body>
-  <main>
-    <h1>YouTube Clipper</h1>
+<main>
+  <h1>YouTube Clipper</h1>
 
-    <section class="toolbar">
-      <input id="url" autocomplete="off" spellcheck="false">
-      <button id="grab">Grab Video</button>
-    </section>
+  <section class="card toolbar">
+    <input id="url" type="text" autocomplete="off" spellcheck="false" placeholder="https://youtube.com/watch?v=…">
+    <button id="grab">Grab Video</button>
+  </section>
 
-    <section class="preview" id="previewBox">
-      <div class="empty-preview" id="emptyPreview">Paste a YouTube URL, then grab the video to load the embedded preview.</div>
-    </section>
+  <div class="cookie-bar">
+    <span class="cookie-status" id="cookieStatus">
+      <span class="cookie-dot"></span>
+      <span id="cookieStatusText">Checking cookies…</span>
+    </span>
+    <label class="cookie-upload-label" title="Upload a Netscape cookies.txt file exported from your browser">
+      ↑ Upload cookies.txt
+      <input type="file" id="cookieFileInput" accept=".txt" style="display:none">
+    </label>
+  </div>
 
-    <section class="clip-controls" id="clipControls">
-      <label>
-        Start
-        <span class="time-input">
-          <input id="startHours" autocomplete="off" inputmode="numeric" aria-label="Start hours">
-          <span class="time-separator">:</span>
-          <input id="startMinutes" autocomplete="off" inputmode="numeric" aria-label="Start minutes">
-          <span class="time-separator">:</span>
-          <input id="startSeconds" autocomplete="off" inputmode="decimal" aria-label="Start seconds">
-        </span>
-      </label>
-      <label>
-        End
-        <span class="time-input">
-          <input id="endHours" autocomplete="off" inputmode="numeric" aria-label="End hours">
-          <span class="time-separator">:</span>
-          <input id="endMinutes" autocomplete="off" inputmode="numeric" aria-label="End minutes">
-          <span class="time-separator">:</span>
-          <input id="endSeconds" autocomplete="off" inputmode="decimal" aria-label="End seconds">
-        </span>
-      </label>
-      <label>
-        Output file
-        <input id="fileName" autocomplete="off">
-      </label>
-      <button id="chop">Chop Clip</button>
-    </section>
+  <section class="preview" id="previewBox">
+    <div class="empty-preview">Paste a YouTube URL above, then click Grab Video.</div>
+  </section>
 
-    <section class="status" id="status">Ready.</section>
-    <section class="download-area" id="downloadArea"></section>
-  </main>
+  <div class="clip-bar-wrapper" id="clipBarWrapper">
+    <div class="clip-bar">
+      <div class="clip-bar-fill" id="clipBarFill" style="left:0%;width:100%"></div>
+    </div>
+    <div class="clip-bar-labels">
+      <span id="clipBarStart">0:00</span>
+      <span id="clipBarDuration"></span>
+      <span id="clipBarEnd"></span>
+    </div>
+  </div>
 
-  <script>
-    const defaults = __DEFAULTS__;
-    const urlInput = document.querySelector("#url");
-    const startFields = {
-      hours: document.querySelector("#startHours"),
-      minutes: document.querySelector("#startMinutes"),
-      seconds: document.querySelector("#startSeconds"),
-    };
-    const endFields = {
-      hours: document.querySelector("#endHours"),
-      minutes: document.querySelector("#endMinutes"),
-      seconds: document.querySelector("#endSeconds"),
-    };
-    const fileNameInput = document.querySelector("#fileName");
-    const grabButton = document.querySelector("#grab");
-    const chopButton = document.querySelector("#chop");
-    const clipControls = document.querySelector("#clipControls");
-    const previewBox = document.querySelector("#previewBox");
-    const statusBox = document.querySelector("#status");
-    const downloadArea = document.querySelector("#downloadArea");
+  <section class="card clip-controls" id="clipControls">
+    <div class="time-group" style="grid-area:start">
+      <label for="startTime">Start</label>
+      <div class="time-row">
+        <input id="startTime" type="text" autocomplete="off" inputmode="numeric" placeholder="0:00:00">
+        <button id="markIn" class="secondary" title="Mark in at current position [ ">⬥ Mark In</button>
+      </div>
+    </div>
 
-    urlInput.value = defaults.url;
-    setTimeFields(startFields, defaults.start);
-    setTimeFields(endFields, defaults.end);
-    fileNameInput.value = defaults.fileName;
+    <div class="time-group" style="grid-area:end">
+      <label for="endTime">End</label>
+      <div class="time-row">
+        <input id="endTime" type="text" autocomplete="off" inputmode="numeric" placeholder="0:00:00">
+        <button id="markOut" class="secondary" title="Mark out at current position ]">Mark Out ⬦</button>
+      </div>
+    </div>
 
-    function setBusy(isBusy, text) {
-      grabButton.disabled = isBusy;
-      chopButton.disabled = isBusy;
-      if (text) statusBox.textContent = text;
-    }
+    <div class="clip-meta">
+      Duration: <span class="duration-value" id="durationValue">—</span>
+      <span class="hint"><kbd>[</kbd> Mark In &nbsp; <kbd>]</kbd> Mark Out</span>
+    </div>
 
-    function setTimeFields(fields, value) {
-      const text = String(value || "").trim();
-      if (!text) return;
-      const parts = text.split(":");
-      fields.hours.value = parts.length === 3 ? parts[0] : "";
-      fields.minutes.value = parts.length >= 2 ? parts[parts.length - 2] : "";
-      fields.seconds.value = parts[parts.length - 1] || "";
-    }
+    <div class="file-group">
+      <label for="fileName">Output file</label>
+      <input id="fileName" type="text" autocomplete="off">
+    </div>
 
-    function parseWholePart(value, label) {
-      const text = String(value).trim();
-      if (!/^\d+$/.test(text)) throw new Error(`${label} must be a whole number.`);
-      return Number.parseInt(text, 10);
-    }
+    <button id="chop">✂ Chop Clip</button>
+  </section>
 
-    function parseSecondsPart(value, label) {
-      const text = String(value).trim();
-      if (!/^\d+(\.\d+)?$/.test(text)) throw new Error(`${label} must be a number.`);
-      return Number(text);
-    }
+  <div class="progress-track" id="progressTrack">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
 
-    function readTimeFields(fields, label, requireAny = false) {
-      const rawHours = fields.hours.value.trim();
-      const rawMinutes = fields.minutes.value.trim();
-      const rawSeconds = fields.seconds.value.trim();
-      const hasAny = Boolean(rawHours || rawMinutes || rawSeconds);
+  <section class="status" id="status" data-type="idle">Ready.</section>
+  <div id="downloadArea"></div>
+</main>
 
-      if (!hasAny) {
-        if (requireAny) throw new Error(`Enter ${label.toLowerCase()} time before chopping.`);
-        return {seconds: null, payload: ""};
+<script>
+  const defaults = __DEFAULTS__;
+
+  // ── Element refs ──────────────────────────────────────────────────────────
+  const urlInput        = document.getElementById("url");
+  const grabButton      = document.getElementById("grab");
+  const previewBox      = document.getElementById("previewBox");
+  const clipControls    = document.getElementById("clipControls");
+  const clipBarWrapper  = document.getElementById("clipBarWrapper");
+  const clipBarFill     = document.getElementById("clipBarFill");
+  const clipBarStart    = document.getElementById("clipBarStart");
+  const clipBarDuration = document.getElementById("clipBarDuration");
+  const clipBarEnd      = document.getElementById("clipBarEnd");
+  const startInput      = document.getElementById("startTime");
+  const endInput        = document.getElementById("endTime");
+  const durationValue   = document.getElementById("durationValue");
+  const fileNameInput   = document.getElementById("fileName");
+  const chopButton      = document.getElementById("chop");
+  const progressTrack   = document.getElementById("progressTrack");
+  const progressFill    = document.getElementById("progressFill");
+  const statusBox       = document.getElementById("status");
+  const downloadArea    = document.getElementById("downloadArea");
+
+  // ── Defaults ──────────────────────────────────────────────────────────────
+  urlInput.value      = defaults.url;
+  startInput.value    = defaults.start;
+  endInput.value      = defaults.end;
+  fileNameInput.value = defaults.fileName;
+
+  // ── Time utilities ────────────────────────────────────────────────────────
+  function parseTimeInput(text) {
+    const t = String(text || "").trim();
+    if (!t) return null;
+    const parts = t.split(":");
+    try {
+      if (parts.length === 1) {
+        const s = parseFloat(parts[0]);
+        return isNaN(s) ? null : s;
       }
-
-      const hours = rawHours ? parseWholePart(rawHours, `${label} hours`) : 0;
-      const minutes = rawMinutes ? parseWholePart(rawMinutes, `${label} minutes`) : 0;
-      const seconds = rawSeconds ? parseSecondsPart(rawSeconds, `${label} seconds`) : 0;
-
-      if (minutes > 59) throw new Error(`${label} minutes must be 0 through 59.`);
-      if (seconds >= 60) throw new Error(`${label} seconds must be less than 60.`);
-
-      return {
-        seconds: hours * 3600 + minutes * 60 + seconds,
-        payload: `${hours}:${minutes}:${seconds}`,
-      };
-    }
-
-    function getClipWindow(requireBoth = false) {
-      const startTime = readTimeFields(startFields, "Start", requireBoth);
-      const endTime = readTimeFields(endFields, "End", requireBoth);
-      const start = startTime.seconds;
-      const end = endTime.seconds;
-      if (requireBoth && (start === null || end === null)) {
-        throw new Error("Enter both start and end times before chopping.");
+      if (parts.length === 2) {
+        const m = parseInt(parts[0], 10), s = parseFloat(parts[1]);
+        return (isNaN(m) || isNaN(s)) ? null : m * 60 + s;
       }
-      if (start !== null && end !== null && end <= start) {
-        throw new Error("End time must be later than start time.");
-      }
-      return {
-        start,
-        end,
-        startPayload: startTime.payload,
-        endPayload: endTime.payload,
-      };
+      const h = parseInt(parts[0], 10), m = parseInt(parts[1], 10), s = parseFloat(parts[2]);
+      return (isNaN(h) || isNaN(m) || isNaN(s)) ? null : h * 3600 + m * 60 + s;
+    } catch { return null; }
+  }
+
+  function formatTime(total) {
+    if (total === null || isNaN(total) || total < 0) return "—";
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    // always two digits before any decimal point
+    const sStr = s.toFixed(3).replace(/\.?0+$/, "");
+    const sPad = sStr.replace(/^(\d)(?=\.|$)/, "0$1");
+    if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${sPad}`;
+    return `${m}:${sPad}`;
+  }
+
+  function validateClipWindow(requireBoth = false) {
+    const start = parseTimeInput(startInput.value);
+    const end   = parseTimeInput(endInput.value);
+    if (requireBoth && start === null) throw new Error("Enter a start time before chopping.");
+    if (requireBoth && end   === null) throw new Error("Enter an end time before chopping.");
+    if (start !== null && end !== null && end <= start) {
+      throw new Error("End time must be later than start time.");
     }
+    return { start, end, startPayload: startInput.value.trim(), endPayload: endInput.value.trim() };
+  }
 
-    function enforcePreviewWindow(video) {
-      const {start, end} = getClipWindow();
-      if (start !== null && video.currentTime < start) {
-        video.currentTime = start;
-      }
-      if (start !== null && end !== null && video.currentTime >= end) {
-        video.currentTime = start;
-      }
-      return {start, end};
+  // ── Progress bar ──────────────────────────────────────────────────────────
+  function startProgress() {
+    progressTrack.classList.add("active");
+    progressFill.classList.add("running");
+  }
+  function stopProgress() {
+    progressFill.classList.remove("running");
+    progressTrack.classList.remove("active");
+  }
+
+  // ── Status ────────────────────────────────────────────────────────────────
+  function setStatus(message, type = "idle") {
+    statusBox.textContent = message;
+    statusBox.dataset.type = type;
+  }
+
+  // ── Busy state ────────────────────────────────────────────────────────────
+  function setBusy(isBusy, message = "", type = "loading") {
+    grabButton.disabled = isBusy;
+    chopButton.disabled = isBusy;
+    if (message) setStatus(message, type);
+    if (isBusy) startProgress(); else stopProgress();
+  }
+
+  // ── Player accessors ──────────────────────────────────────────────────────
+  function getPlayerDuration() {
+    const video = previewBox.querySelector("video");
+    if (video && isFinite(video.duration)) return video.duration;
+    if (youtubePlayer && typeof youtubePlayer.getDuration === "function") {
+      const d = youtubePlayer.getDuration();
+      if (d > 0) return d;
     }
+    return null;
+  }
 
-    let youtubePlayer = null;
-    let youtubeClampTimer = null;
-    let youtubeApiPromise = null;
-
-    function loadYouTubeApi() {
-      if (window.YT && window.YT.Player) return Promise.resolve();
-      if (youtubeApiPromise) return youtubeApiPromise;
-
-      youtubeApiPromise = new Promise((resolve) => {
-        window.onYouTubeIframeAPIReady = () => resolve();
-        const script = document.createElement("script");
-        script.src = "https://www.youtube.com/iframe_api";
-        document.head.appendChild(script);
-      });
-      return youtubeApiPromise;
+  function getCurrentPlayerTime() {
+    const video = previewBox.querySelector("video");
+    if (video) return video.currentTime;
+    if (youtubePlayer && typeof youtubePlayer.getCurrentTime === "function") {
+      return youtubePlayer.getCurrentTime();
     }
+    return null;
+  }
 
-    function clearYouTubeClamp() {
-      if (youtubeClampTimer) {
-        clearInterval(youtubeClampTimer);
-        youtubeClampTimer = null;
-      }
-    }
+  // ── Duration display & clip range bar ────────────────────────────────────
+  function updateDuration() {
+    const start = parseTimeInput(startInput.value);
+    const end   = parseTimeInput(endInput.value);
+    durationValue.textContent = (start !== null && end !== null && end > start)
+      ? formatTime(end - start) : "—";
+    updateClipBar();
+  }
 
-    function setLocalPreview(previewUrl, startSeconds) {
-      clearYouTubeClamp();
-      youtubePlayer = null;
-      previewBox.innerHTML = "";
-      const video = document.createElement("video");
-      video.src = previewUrl;
-      video.controls = true;
-      video.preload = "metadata";
-      video.addEventListener("loadedmetadata", () => {
-        if (startSeconds !== null) video.currentTime = startSeconds;
-      }, {once: true});
-      video.addEventListener("play", () => {
-        try {
-          enforcePreviewWindow(video);
-        } catch (error) {
-          video.pause();
-          statusBox.textContent = error.message;
-        }
-      });
-      video.addEventListener("seeking", () => {
-        try {
-          const {start, end} = getClipWindow();
-          if (start !== null && video.currentTime < start) video.currentTime = start;
-          if (start !== null && end !== null && video.currentTime >= end) {
-            video.currentTime = start;
-          }
-        } catch (error) {
-          statusBox.textContent = error.message;
-        }
-      });
-      video.addEventListener("timeupdate", () => {
-        try {
-          const {start, end} = getClipWindow();
-          if (start !== null && video.currentTime < start) {
-            video.currentTime = start;
-          } else if (start !== null && end !== null && video.currentTime >= end) {
-            video.pause();
-            video.currentTime = start;
-          }
-        } catch (error) {
-          video.pause();
-          statusBox.textContent = error.message;
-        }
-      });
-      previewBox.appendChild(video);
-    }
+  function updateClipBar() {
+    const duration = getPlayerDuration();
+    if (!duration) return;
+    const start = parseTimeInput(startInput.value) ?? 0;
+    const end   = parseTimeInput(endInput.value)   ?? duration;
+    const s = Math.max(0, Math.min(100, (start / duration) * 100));
+    const e = Math.max(0, Math.min(100, (end   / duration) * 100));
+    clipBarFill.style.left  = `${s}%`;
+    clipBarFill.style.width = `${e - s}%`;
+    clipBarStart.textContent    = formatTime(start);
+    clipBarEnd.textContent      = formatTime(end);
+    clipBarDuration.textContent = (end > start) ? formatTime(end - start) : "";
+  }
 
-    async function setYouTubePreview(videoId, startSeconds) {
-      clearYouTubeClamp();
-      previewBox.innerHTML = '<div id="youtubePlayer"></div>';
-      await loadYouTubeApi();
+  function showClipBar() {
+    clipBarWrapper.classList.add("visible");
+    updateClipBar();
+  }
 
-      const playerVars = {
-        autoplay: 0,
-        controls: 1,
-        enablejsapi: 1,
-        origin: window.location.origin,
-        rel: 0,
-      };
-      if (startSeconds !== null) {
-        playerVars.start = Math.floor(startSeconds);
-      }
+  // ── Mark In / Mark Out ────────────────────────────────────────────────────
+  function markIn() {
+    const t = getCurrentPlayerTime();
+    if (t === null) return;
+    startInput.value = formatTime(t);
+    updateDuration();
+    refreshPreview().catch(() => {});
+  }
 
-      youtubePlayer = new YT.Player("youtubePlayer", {
-        width: "100%",
-        height: "100%",
-        videoId,
-        playerVars,
-        events: {
-          onReady: (event) => {
-            if (startSeconds !== null) event.target.seekTo(startSeconds, true);
-            clampYouTubePlayer(event.target);
-          },
-          onStateChange: (event) => {
-            if (event.data === YT.PlayerState.PLAYING) {
-              clampYouTubePlayer(event.target);
-            }
-          },
-          onError: () => {
-            fallbackToLocalPreview("YouTube embed is unavailable. Downloading for local preview...");
-          },
-        },
-      });
-    }
+  function markOut() {
+    const t = getCurrentPlayerTime();
+    if (t === null) return;
+    endInput.value = formatTime(t);
+    updateDuration();
+  }
 
-    function clampYouTubePlayer(player) {
-      clearYouTubeClamp();
-      youtubeClampTimer = setInterval(() => {
-        try {
-          const {start, end} = getClipWindow();
-          const current = player.getCurrentTime();
-          if (start !== null && current < start) {
-            player.seekTo(start, true);
-          } else if (start !== null && end !== null && current >= end) {
-            player.pauseVideo();
-            player.seekTo(start, true);
-          }
-        } catch (error) {
+  document.getElementById("markIn").addEventListener("click", markIn);
+  document.getElementById("markOut").addEventListener("click", markOut);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.key === "[") markIn();
+    if (e.key === "]") markOut();
+  });
+
+  // ── Preview window enforcement ────────────────────────────────────────────
+  function enforcePreviewWindow(video) {
+    const { start, end } = validateClipWindow();
+    if (start !== null && video.currentTime < start) video.currentTime = start;
+    if (start !== null && end !== null && video.currentTime >= end) video.currentTime = start;
+  }
+
+  // ── YouTube player state ──────────────────────────────────────────────────
+  let youtubePlayer     = null;
+  let youtubeClampTimer = null;
+  let youtubeApiPromise = null;
+
+  function loadYouTubeApi() {
+    if (window.YT && window.YT.Player) return Promise.resolve();
+    if (youtubeApiPromise) return youtubeApiPromise;
+    youtubeApiPromise = new Promise((resolve) => {
+      window.onYouTubeIframeAPIReady = () => resolve();
+      const s = document.createElement("script");
+      s.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(s);
+    });
+    return youtubeApiPromise;
+  }
+
+  function clearYouTubeClamp() {
+    if (youtubeClampTimer) { clearInterval(youtubeClampTimer); youtubeClampTimer = null; }
+  }
+
+  function clampYouTubePlayer(player) {
+    clearYouTubeClamp();
+    youtubeClampTimer = setInterval(() => {
+      try {
+        const { start, end } = validateClipWindow();
+        const cur = player.getCurrentTime();
+        if (start !== null && cur < start) {
+          player.seekTo(start, true);
+        } else if (start !== null && end !== null && cur >= end) {
           player.pauseVideo();
-          statusBox.textContent = error.message;
+          player.seekTo(start, true);
         }
-      }, 250);
-    }
+      } catch { player.pauseVideo(); }
+    }, 250);
+  }
 
-    async function fallbackToLocalPreview(message) {
+  function setLocalPreview(previewUrl, startSeconds) {
+    clearYouTubeClamp();
+    youtubePlayer = null;
+    previewBox.innerHTML = "";
+    const video = document.createElement("video");
+    video.src = previewUrl;
+    video.controls = true;
+    video.preload = "metadata";
+    video.addEventListener("loadedmetadata", () => {
+      if (startSeconds !== null) video.currentTime = startSeconds;
+      showClipBar();
+    }, { once: true });
+    video.addEventListener("play", () => {
+      try { enforcePreviewWindow(video); }
+      catch (err) { video.pause(); setStatus(err.message, "error"); }
+    });
+    video.addEventListener("seeking", () => {
       try {
-        setBusy(true, message);
-        const data = await postJson("/api/local-preview", {
-          url: urlInput.value,
-          start: readTimeFields(startFields, "Start").payload,
-        });
-        setLocalPreview(data.previewUrl, data.startSeconds);
-        statusBox.textContent = "Local preview loaded. Adjust start/end times, then chop the clip.";
-      } catch (error) {
-        statusBox.textContent = error.message;
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function postJson(path, payload) {
-      const response = await fetch(path, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Request failed.");
-      }
-      return data;
-    }
-
-    async function refreshPreview() {
-      const data = await postJson("/api/preview", {
-        start: readTimeFields(startFields, "Start").payload,
-      });
-      const video = previewBox.querySelector("video");
-      if (video) {
-        if (data.startSeconds !== null) {
-          video.currentTime = data.startSeconds;
-        } else {
-          enforcePreviewWindow(video);
+        const { start, end } = validateClipWindow();
+        if (start !== null && video.currentTime < start) video.currentTime = start;
+        if (start !== null && end !== null && video.currentTime >= end) video.currentTime = start;
+      } catch (err) { setStatus(err.message, "error"); }
+    });
+    video.addEventListener("timeupdate", () => {
+      try {
+        const { start, end } = validateClipWindow();
+        if (start !== null && video.currentTime < start) {
+          video.currentTime = start;
+        } else if (start !== null && end !== null && video.currentTime >= end) {
+          video.pause();
+          video.currentTime = start;
         }
-      } else if (youtubePlayer) {
-        if (data.startSeconds !== null) youtubePlayer.seekTo(data.startSeconds, true);
-        clampYouTubePlayer(youtubePlayer);
-      } else if (data.previewUrl) {
-        setLocalPreview(data.previewUrl, data.startSeconds);
-      }
+      } catch (err) { video.pause(); setStatus(err.message, "error"); }
+    });
+    previewBox.appendChild(video);
+  }
+
+  async function setYouTubePreview(videoId, startSeconds) {
+    clearYouTubeClamp();
+    previewBox.innerHTML = '<div id="youtubePlayer"></div>';
+    await loadYouTubeApi();
+    const playerVars = { autoplay: 0, controls: 1, enablejsapi: 1, origin: window.location.origin, rel: 0 };
+    if (startSeconds !== null) playerVars.start = Math.floor(startSeconds);
+    youtubePlayer = new YT.Player("youtubePlayer", {
+      width: "100%", height: "100%", videoId, playerVars,
+      events: {
+        onReady: (e) => {
+          if (startSeconds !== null) e.target.seekTo(startSeconds, true);
+          clampYouTubePlayer(e.target);
+          showClipBar();
+        },
+        onStateChange: (e) => {
+          if (e.data === YT.PlayerState.PLAYING) clampYouTubePlayer(e.target);
+        },
+        onError: () => fallbackToLocalPreview("YouTube embed blocked — downloading for local preview…"),
+      },
+    });
+  }
+
+  async function fallbackToLocalPreview(message) {
+    try {
+      setBusy(true, message);
+      const data = await postJson("/api/local-preview", {
+        url: urlInput.value, start: startInput.value.trim(),
+      });
+      setLocalPreview(data.previewUrl, data.startSeconds);
+      setStatus("Local preview loaded. Adjust clip times, then chop.", "idle");
+    } catch (err) {
+      setStatus(err.message, "error");
+    } finally {
+      setBusy(false);
     }
+  }
 
-    grabButton.addEventListener("click", async () => {
-      try {
-        setBusy(true, "Loading YouTube preview...");
-        downloadArea.innerHTML = "";
-        const data = await postJson("/api/grab", {url: urlInput.value});
-        await setYouTubePreview(data.videoId, data.startSeconds);
-        clipControls.classList.add("visible");
-        statusBox.textContent = "YouTube preview loaded. If the embed is blocked, local preview will download automatically.";
-      } catch (error) {
-        statusBox.textContent = error.message;
-      } finally {
-        setBusy(false);
-      }
+  // ── API helpers ───────────────────────────────────────────────────────────
+  async function postJson(path, payload) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || "Request failed.");
+    return data;
+  }
 
-    chopButton.addEventListener("click", async () => {
-      try {
-        const {startPayload, endPayload} = getClipWindow(true);
-        setBusy(true, "Cutting clip...");
-        const data = await postJson("/api/chop", {
-          start: startPayload,
-          end: endPayload,
-          fileName: fileNameInput.value,
-        });
-        statusBox.textContent = `Clip created:\n${data.outputPath}\n\nTemporary downloaded source video deleted.`;
-        downloadArea.innerHTML = "";
-        const link = document.createElement("a");
-        link.href = data.downloadUrl;
-        link.download = data.fileName;
-        link.textContent = "Download clip";
-        downloadArea.appendChild(link);
-        fileNameInput.value = data.nextFileName;
-        clipControls.classList.remove("visible");
-        previewBox.innerHTML = '<div class="empty-preview">Clip created. Grab another video to preview again.</div>';
-      } catch (error) {
-        statusBox.textContent = error.message;
-      } finally {
-        setBusy(false);
-      }
-    });
+  async function refreshPreview() {
+    const data = await postJson("/api/preview", { start: startInput.value.trim() });
+    const video = previewBox.querySelector("video");
+    if (video) {
+      if (data.startSeconds !== null) video.currentTime = data.startSeconds;
+      else enforcePreviewWindow(video);
+    } else if (youtubePlayer) {
+      if (data.startSeconds !== null) youtubePlayer.seekTo(data.startSeconds, true);
+      clampYouTubePlayer(youtubePlayer);
+    } else if (data.previewUrl) {
+      setLocalPreview(data.previewUrl, data.startSeconds);
+    }
+  }
 
-    Object.values(startFields).forEach((input) => input.addEventListener("change", async () => {
-      try {
-        await refreshPreview();
-        statusBox.textContent = "Preview timing updated.";
-      } catch (error) {
-        statusBox.textContent = error.message;
-      }
-    }));
+  // ── Grab ──────────────────────────────────────────────────────────────────
+  grabButton.addEventListener("click", async () => {
+    try {
+      setBusy(true, "Loading preview…", "loading");
+      downloadArea.innerHTML = "";
+      const data = await postJson("/api/grab", { url: urlInput.value });
+      await setYouTubePreview(data.videoId, data.startSeconds);
+      clipControls.classList.add("visible");
+      setStatus("Preview loaded. If the embed is blocked, local preview will download automatically.", "idle");
+    } catch (err) {
+      setStatus(err.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  });
 
-    Object.values(endFields).forEach((input) => input.addEventListener("change", async () => {
-      try {
-        const video = previewBox.querySelector("video");
-        if (video) enforcePreviewWindow(video);
-        if (youtubePlayer) clampYouTubePlayer(youtubePlayer);
-        statusBox.textContent = "Preview timing updated.";
-      } catch (error) {
-        statusBox.textContent = error.message;
+  // ── Chop ──────────────────────────────────────────────────────────────────
+  chopButton.addEventListener("click", async () => {
+    try {
+      const { startPayload, endPayload } = validateClipWindow(true);
+      setBusy(true, "Cutting clip…", "loading");
+      const data = await postJson("/api/chop", {
+        start: startPayload, end: endPayload, fileName: fileNameInput.value,
+      });
+      setStatus(`Clip saved:\n${data.outputPath}`, "success");
+      downloadArea.innerHTML = "";
+      const a = document.createElement("a");
+      a.href = data.downloadUrl;
+      a.download = data.fileName;
+      a.className = "download-btn";
+      a.textContent = "⬇ Download clip";
+      downloadArea.appendChild(a);
+      fileNameInput.value = data.nextFileName;
+      clipControls.classList.remove("visible");
+      clipBarWrapper.classList.remove("visible");
+      previewBox.innerHTML = '<div class="empty-preview">Clip created. Grab another video to continue.</div>';
+    } catch (err) {
+      setStatus(err.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  // ── Time input listeners ──────────────────────────────────────────────────
+  startInput.addEventListener("change", async () => {
+    updateDuration();
+    try { await refreshPreview(); } catch { /* ignore */ }
+  });
+  endInput.addEventListener("change", () => {
+    updateDuration();
+    const video = previewBox.querySelector("video");
+    try {
+      if (video) enforcePreviewWindow(video);
+      if (youtubePlayer) clampYouTubePlayer(youtubePlayer);
+    } catch { /* ignore */ }
+  });
+  startInput.addEventListener("input", updateDuration);
+  endInput.addEventListener("input",   updateDuration);
+
+  // ── Cookie status & upload ────────────────────────────────────────────────
+  const cookieStatus     = document.getElementById("cookieStatus");
+  const cookieStatusText = document.getElementById("cookieStatusText");
+  const cookieFileInput  = document.getElementById("cookieFileInput");
+
+  async function refreshCookieStatus() {
+    try {
+      const res  = await fetch("/api/cookie-status");
+      const data = await res.json();
+      if (data.loaded) {
+        const label = data.source === "secret" ? "Secret file" : "Uploaded";
+        cookieStatusText.textContent = `Cookies active (${label})`;
+        cookieStatus.className = "cookie-status loaded";
+      } else {
+        cookieStatusText.textContent = "No cookies — YouTube may block downloads";
+        cookieStatus.className = "cookie-status missing";
       }
-    }));
-  </script>
+    } catch {
+      cookieStatusText.textContent = "Cookie status unknown";
+      cookieStatus.className = "cookie-status";
+    }
+  }
+
+  cookieFileInput.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const content = await file.text();
+      await postJson("/api/cookies", { content });
+      cookieStatusText.textContent = "Cookies uploaded — refreshing…";
+      await refreshCookieStatus();
+    } catch (err) {
+      setStatus(err.message, "error");
+    } finally {
+      e.target.value = "";
+    }
+  });
+
+  refreshCookieStatus();
+</script>
 </body>
 </html>
 """
@@ -698,6 +976,9 @@ class ClipperRequestHandler(BaseHTTPRequestHandler):
         if route == "/download":
             self.send_finished_clip()
             return
+        if route == "/api/cookie-status":
+            self.handle_cookie_status()
+            return
         self.send_error(404, "Not found")
 
     def do_POST(self) -> None:
@@ -710,6 +991,8 @@ class ClipperRequestHandler(BaseHTTPRequestHandler):
                 self.handle_chop()
             elif self.path == "/api/preview":
                 self.handle_preview()
+            elif self.path == "/api/cookies":
+                self.handle_upload_cookies()
             else:
                 self.send_json({"ok": False, "error": "Unknown endpoint."}, status=404)
         except Exception as exc:
@@ -832,6 +1115,25 @@ class ClipperRequestHandler(BaseHTTPRequestHandler):
             }
         )
 
+    def handle_cookie_status(self) -> None:
+        cookies = get_active_cookies_file()
+        if cookies is None:
+            self.send_json({"ok": True, "loaded": False})
+            return
+        source = "secret" if str(cookies) == YTDLP_COOKIES_FILE else "upload"
+        self.send_json({"ok": True, "loaded": True, "source": source})
+
+    def handle_upload_cookies(self) -> None:
+        payload = self.read_json()
+        content = str(payload.get("content", "")).strip()
+        if not content:
+            raise ValueError("Cookie file content is empty.")
+        if "# Netscape HTTP Cookie File" not in content and "# HTTP Cookie File" not in content:
+            raise ValueError("This does not look like a Netscape cookies.txt file. Export cookies using a browser extension such as 'Get cookies.txt LOCALLY'.")
+        SESSION_COOKIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SESSION_COOKIES_FILE.write_text(content, encoding="utf-8")
+        self.send_json({"ok": True})
+
     def read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(length)
@@ -937,6 +1239,14 @@ class ClipperRequestHandler(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
 
 
+def get_active_cookies_file() -> Path | None:
+    """Return the first cookies file that exists: env-configured, then session-uploaded."""
+    for path in (Path(YTDLP_COOKIES_FILE), SESSION_COOKIES_FILE):
+        if path.exists():
+            return path
+    return None
+
+
 def download_video(url: str) -> Path:
     """Download a YouTube URL and return the temporary local video path."""
     ytdlp = find_yt_dlp_command()
@@ -965,8 +1275,8 @@ def download_video(url: str) -> Path:
         str(path_log),
     ]
 
-    cookies_file = Path(YTDLP_COOKIES_FILE)
-    if cookies_file.exists():
+    cookies_file = get_active_cookies_file()
+    if cookies_file:
         command.extend(["--cookies", str(cookies_file)])
 
     command.append(url)
@@ -1202,13 +1512,19 @@ def run_checked(command: Iterable[str], step_name: str) -> None:
     if completed.returncode != 0:
         details = completed.stderr.strip() or completed.stdout.strip()
         if details:
-            raise RuntimeError(f"{step_name} failed:\n{friendly_command_error(details)}")
+            raise RuntimeError(
+                f"{step_name} failed:\n{friendly_command_error(details)}"
+            )
         raise RuntimeError(f"{step_name} failed with exit code {completed.returncode}.")
 
 
 def friendly_command_error(details: str) -> str:
     """Add deployment-specific guidance for common yt-dlp failures."""
-    if "Sign in to confirm" in details or "not a bot" in details or "HTTP Error 429" in details:
+    if (
+        "Sign in to confirm" in details
+        or "not a bot" in details
+        or "HTTP Error 429" in details
+    ):
         cookies_file = YTDLP_COOKIES_FILE or DEFAULT_COOKIES_FILE
         return (
             f"{details}\n\n"
