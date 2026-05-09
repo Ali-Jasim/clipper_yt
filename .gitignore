@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+youtube_clips/
+*.mp4
+*.log
+.env

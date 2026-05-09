@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.git/
+.gitignore
+.dockerignore
+youtube_clips/
+*.mp4
+*.log
