@@ -1247,6 +1247,24 @@ def get_active_cookies_file() -> Path | None:
     return None
 
 
+def get_writable_cookies_file() -> Path | None:
+    """Return a writable cookies file for yt-dlp.
+
+    yt-dlp rewrites the cookie file after each run to persist rotated tokens.
+    On Render, /etc/secrets/ is read-only, so we copy the secret file to a
+    writable location inside OUTPUT_DIR before passing it to yt-dlp.
+    """
+    source = get_active_cookies_file()
+    if source is None:
+        return None
+    if os.access(source, os.W_OK):
+        return source
+    writable = OUTPUT_DIR / "_cookies_working.txt"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, writable)
+    return writable
+
+
 def download_video(url: str) -> Path:
     """Download a YouTube URL and return the temporary local video path."""
     ytdlp = find_yt_dlp_command()
@@ -1262,10 +1280,12 @@ def download_video(url: str) -> Path:
         "--no-continue",
         "--merge-output-format",
         "mp4",
-        "--js-runtimes",
-        YTDLP_JS_RUNTIME,
-        "--remote-components",
-        "ejs:npm",
+        # Use the Android and web_creator clients. Android bypasses the bot-check
+        # that YouTube applies to datacenter IPs; web_creator is a fallback that
+        # also tends to avoid it. The default web client requires PO tokens from
+        # datacenter IPs and will 403 even with valid cookies.
+        "--extractor-args",
+        "youtube:player_client=android,web_creator",
         "-f",
         DOWNLOAD_FORMAT,
         "-o",
@@ -1275,7 +1295,7 @@ def download_video(url: str) -> Path:
         str(path_log),
     ]
 
-    cookies_file = get_active_cookies_file()
+    cookies_file = get_writable_cookies_file()
     if cookies_file:
         command.extend(["--cookies", str(cookies_file)])
 
