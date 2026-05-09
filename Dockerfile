@@ -14,10 +14,15 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        curl \
         ffmpeg \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --upgrade pip yt-dlp
+# Deno is yt-dlp's recommended JS runtime for YouTube challenge solving.
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+
+RUN pip install --no-cache-dir --upgrade pip "yt-dlp[default]"
 
 COPY clipper.py /app/clipper.py
 
